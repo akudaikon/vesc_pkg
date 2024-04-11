@@ -79,7 +79,8 @@ typedef enum {
 	BEEP_SENSORS = 7,
 	BEEP_LOWBATT = 8,
 	BEEP_IDLE = 9,
-	BEEP_ERROR = 10
+  BEEP_BMS = 10,
+	BEEP_ERROR = 11
 } BeepReason;
 
 typedef enum {
@@ -89,7 +90,8 @@ typedef enum {
 	TILTBACK_DUTY,
 	TILTBACK_HV,
 	TILTBACK_LV,
-	TILTBACK_TEMP
+	TILTBACK_TEMP,
+  TILTBACK_BMS
 } SetpointAdjustmentType;
 
 typedef struct{
@@ -139,6 +141,10 @@ typedef struct {
 	int beep_countdown;
 	int beep_reason;
 	bool beeper_enabled;
+
+	// BMS
+	bool is_bms_supported;
+	bool allow_bms_tiltback;
 
 	// LEDs
 	LEDData led_data;
@@ -552,6 +558,11 @@ static void configure(data *d) {
 	konami_init(&d->flywheel_konami, flywheel_konami_sequence, sizeof(flywheel_konami_sequence));
 	konami_init(&d->battery_konami, battery_konami_sequence, sizeof(battery_konami_sequence));
 
+	d->is_bms_supported = VESC_IF->mc_fault_to_string(FAULT_CODE_DUMMY_FEATURE_CHECK)[0] == 'B';
+	if (d->is_bms_supported)
+		VESC_IF->printf("BMS Support Detected!\n");
+	d->allow_bms_tiltback = true;
+
 	// External light module support
 	d->lcm_name[0] = '\0';
 	d->lcm_payload.size = 0;
@@ -691,6 +702,8 @@ static float get_setpoint_adjustment_step_size(data *d) {
 			return d->tiltback_duty_step_size;
 		case (TILTBACK_HV):
 		case (TILTBACK_TEMP):
+			return d->tiltback_hv_step_size;
+		case (TILTBACK_BMS):
 			return d->tiltback_hv_step_size;
 		case (TILTBACK_LV):
 			return d->tiltback_lv_step_size;
@@ -947,6 +960,16 @@ static void calculate_setpoint_target(data *d) {
 		}
 		d->setpointAdjustmentType = TILTBACK_DUTY;
 		d->state = RUNNING_TILTBACK;
+	} else if (d->is_bms_supported && d->allow_bms_tiltback && (VESC_IF->bms_get_fault_state() != BMS_FAULT_CODE_NONE)) {
+		d->beep_reason = BEEP_BMS;
+		beep_alert(d, 5, false);
+		d->setpointAdjustmentType = TILTBACK_BMS;
+		d->state = RUNNING_TILTBACK;
+		if(d->erpm > 0){
+			d->setpoint_target = d->float_conf.tiltback_lv_angle;
+		} else {
+			d->setpoint_target = -d->float_conf.tiltback_lv_angle;
+		}
 	} else if (d->abs_duty_cycle > 0.05 && input_voltage > d->float_conf.tiltback_hv) {
 		d->beep_reason = BEEP_HV;
 		beep_alert(d, 3, false);	// Triple-beep
@@ -1637,6 +1660,8 @@ static float haptic_buzz(data *d, float note_period, bool brake) {
 			d->haptic_type = d->float_conf.haptic_buzz_lv;
 		else if (d->setpointAdjustmentType == TILTBACK_TEMP)
 			d->haptic_type = d->float_conf.haptic_buzz_temp;
+		else if (d->setpointAdjustmentType == TILTBACK_BMS)
+			d->haptic_type = d->float_conf.haptic_buzz_bms;
 		else if (d->overcurrent)
 			d->haptic_type = d->float_conf.haptic_buzz_current;
 		else
@@ -2496,6 +2521,17 @@ static void send_realtime_data(data *d){
 	}
 	buffer_append_float32_auto(send_buffer, d->throttle_val, &ind);
 
+	// BMS
+	//VESC_IF->printf("BMS State/Fault = %d/%d\n", VESC_IF->bms_get_op_state(), VESC_IF->bms_get_fault_state());
+	if (d->is_bms_supported) {
+		send_buffer[ind++] = VESC_IF->bms_get_fault_state();
+		send_buffer[ind++] = VESC_IF->bms_get_op_state();
+	}
+	else {
+		send_buffer[ind++] = 0;
+		send_buffer[ind++] = 0;
+	}
+
 	if (ind > BUFSIZE) {
 		VESC_IF->printf("BUFSIZE too small...\n");
 	}
@@ -2581,6 +2617,15 @@ static void cmd_send_all_data(data *d, unsigned char mode){
 			buffer_append_float16(send_buffer, VESC_IF->mc_get_watt_hours_charged(false), 1, &ind);
 			send_buffer[ind++] = fmaxf(0, fminf(110, d->battery_level)) * 2;
 			// ind = 55
+			// BMS
+			if (d->is_bms_supported) {
+				send_buffer[ind++] = VESC_IF->bms_get_fault_state();
+				send_buffer[ind++] = VESC_IF->bms_get_op_state();
+			}
+			else {
+				send_buffer[ind++] = 0;
+				send_buffer[ind++] = 0;
+			}
 		}
 		if (mode >= 4) {
 			// make charge current and voltage available in mode 4
@@ -2911,6 +2956,12 @@ static void cmd_runtime_tune_tilt(data *d, unsigned char *cfg, int len)
 {
 	unsigned int flags = cfg[0];
 	bool duty_beep = flags & 0x1;
+	bool control_bms_tilt = flags & 0x2;
+	if (control_bms_tilt) {
+		d->allow_bms_tiltback = flags & 0x4;
+		beep_alert(d, 1, false);
+		return;
+	}
 	d->float_conf.is_dutybeep_enabled = duty_beep;
 	float retspeed = cfg[1];
 	if (retspeed > 0) {
