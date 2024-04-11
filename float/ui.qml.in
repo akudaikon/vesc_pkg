@@ -486,9 +486,8 @@ Item {
                     "Torque              : " + filtered_current.toFixed(2) + "A\n" +
                     "Acc. Diff.          : " + float_acc_diff.toFixed(2) + "\n" +
                     "Booster Current     : " + applied_booster_current.toFixed(2) + "A\n" +
-                    "Remote Input        : " + (throttle_val * 100).toFixed(0) + "%\n\n"
-                    "BMS State           : " + bmsString + "\n"
-                    "BMS Fault Code      : " + bmsFaultString + "\n"
+                    "Remote Input        : " + (throttle_val * 100).toFixed(0) + "%\n\n" +
+                    "BMS State           : " + bmsString + "\n" 
 
                 if (bmsfault > 0) {
                 debug.text +=

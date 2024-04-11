@@ -79,7 +79,7 @@ typedef enum {
 	BEEP_SENSORS = 7,
 	BEEP_LOWBATT = 8,
 	BEEP_IDLE = 9,
-  BEEP_BMS = 10,
+	BEEP_BMS = 10,
 	BEEP_ERROR = 11
 } BeepReason;
 
@@ -91,7 +91,7 @@ typedef enum {
 	TILTBACK_HV,
 	TILTBACK_LV,
 	TILTBACK_TEMP,
-  TILTBACK_BMS
+	TILTBACK_BMS
 } SetpointAdjustmentType;
 
 typedef struct{
